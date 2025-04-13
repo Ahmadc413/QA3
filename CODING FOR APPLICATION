@@ -1,0 +1,973 @@
+THE FOLLOWING IS THE CODING FORMAT FOR THE APPLICATION 
+
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+import sqlite3
+import random
+import hashlib
+import os
+from functools import partial
+
+class QuizApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Quiz Application")
+        self.root.geometry("800x600")
+        self.root.configure(bg="#f0f0f0")
+        
+        # Create database and tables if they don't exist
+        self.setup_database()
+        
+        # Initialize variables
+        self.current_question = 0
+        self.score = 0
+        self.questions = []
+        self.selected_answer = tk.StringVar()
+        
+        # Show welcome screen
+        self.show_welcome_screen()
+    
+    def setup_database(self):
+        """Create database and tables if they don't exist"""
+        if not os.path.exists("quiz_data.db"):
+            conn = sqlite3.connect("quiz_data.db")
+            cursor = conn.cursor()
+            
+            # Create admin table with default admin user (username: admin, password: admin123)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS admins (
+                    id INTEGER PRIMARY KEY,
+                    username TEXT UNIQUE,
+                    password TEXT
+                )
+            ''')
+            
+            # Default admin password (hashed)
+            hashed_password = hashlib.sha256("admin123".encode()).hexdigest()
+            cursor.execute("INSERT OR IGNORE INTO admins (username, password) VALUES (?, ?)", 
+                          ("admin", hashed_password))
+            
+            # Create category tables
+            categories = ["Math", "Science", "History", "Literature", "General Knowledge"]
+            
+            for category in categories:
+                table_name = category.lower().replace(" ", "_")
+                cursor.execute(f'''
+                    CREATE TABLE IF NOT EXISTS {table_name} (
+                        id INTEGER PRIMARY KEY,
+                        question TEXT,
+                        option_a TEXT,
+                        option_b TEXT,
+                        option_c TEXT,
+                        option_d TEXT,
+                        correct_answer TEXT
+                    )
+                ''')
+                
+                # Add sample questions for each category
+                self.add_sample_questions(cursor, table_name, category)
+            
+            conn.commit()
+            conn.close()
+    
+    def add_sample_questions(self, cursor, table_name, category):
+        """Add sample questions to each category table"""
+        
+        sample_questions = {
+            "math": [
+                ("What is 5 + 7?", "10", "12", "15", "11", "B"),
+                ("What is the square root of 64?", "6", "7", "8", "9", "C"),
+                ("What is 3 × 9?", "21", "24", "27", "30", "C"),
+                ("What is 20 ÷ 5?", "4", "5", "6", "3", "A"),
+                ("What is 2³?", "6", "8", "4", "10", "B"),
+                ("What is the value of π (pi) to two decimal places?", "3.14", "3.16", "3.12", "3.18", "A"),
+                ("What is the area of a square with side length 5?", "20", "25", "30", "10", "B"),
+                ("What is 15% of 80?", "12", "8", "10", "16", "A"),
+                ("What is the sum of angles in a triangle?", "90°", "180°", "270°", "360°", "B"),
+                ("What is the next number in the sequence: 2, 4, 8, 16, ...?", "24", "32", "30", "18", "B")
+            ],
+            "science": [
+                ("What is the chemical symbol for gold?", "Au", "Ag", "Fe", "Gd", "A"),
+                ("What is the closest planet to the Sun?", "Venus", "Earth", "Mars", "Mercury", "D"),
+                ("What is the hardest natural substance on Earth?", "Platinum", "Diamond", "Quartz", "Steel", "B"),
+                ("Which gas do plants absorb from the atmosphere?", "Oxygen", "Carbon Dioxide", "Nitrogen", "Hydrogen", "B"),
+                ("What is the largest organ in the human body?", "Heart", "Liver", "Skin", "Lungs", "C"),
+                ("What particle has a positive charge?", "Electron", "Neutron", "Proton", "Photon", "C"),
+                ("Which vitamin is produced when your skin is exposed to sunlight?", "Vitamin A", "Vitamin C", "Vitamin D", "Vitamin K", "C"),
+                ("What is the chemical formula for water?", "H2O", "CO2", "CH4", "NH3", "A"),
+                ("What is the process by which plants make their food?", "Digestion", "Photosynthesis", "Respiration", "Excretion", "B"),
+                ("What type of energy is stored in a battery?", "Kinetic", "Thermal", "Chemical", "Nuclear", "C")
+            ],
+            "history": [
+                ("Who was the first President of the United States?", "Thomas Jefferson", "John Adams", "George Washington", "Benjamin Franklin", "C"),
+                ("In which year did World War II end?", "1943", "1945", "1947", "1950", "B"),
+                ("Who wrote the Declaration of Independence?", "George Washington", "Benjamin Franklin", "Thomas Jefferson", "John Adams", "C"),
+                ("Which ancient civilization built the pyramids?", "Greeks", "Romans", "Egyptians", "Mayans", "C"),
+                ("Who painted the Mona Lisa?", "Michelangelo", "Leonardo da Vinci", "Pablo Picasso", "Vincent van Gogh", "B"),
+                ("Which event marked the start of World War I?", "Bombing of Pearl Harbor", "Assassination of Archduke Franz Ferdinand", "Russian Revolution", "The Great Depression", "B"),
+                ("Who was the first woman to win a Nobel Prize?", "Marie Curie", "Rosalind Franklin", "Jane Goodall", "Mother Teresa", "A"),
+                ("In which year did Columbus reach America?", "1492", "1592", "1392", "1520", "A"),
+                ("Which empire was ruled by Genghis Khan?", "Roman Empire", "Ottoman Empire", "Mongol Empire", "Persian Empire", "C"),
+                ("Who was the leader of the Soviet Union during World War II?", "Lenin", "Stalin", "Khrushchev", "Gorbachev", "B")
+            ],
+            "literature": [
+                ("Who wrote 'Romeo and Juliet'?", "Charles Dickens", "William Shakespeare", "Jane Austen", "Mark Twain", "B"),
+                ("What is the name of the main character in 'Moby Dick'?", "Ahab", "Ishmael", "Queequeg", "Starbuck", "B"),
+                ("Who wrote '1984'?", "Aldous Huxley", "George Orwell", "Ray Bradbury", "J.D. Salinger", "B"),
+                ("In 'Harry Potter', what is the name of Harry's owl?", "Crookshanks", "Scabbers", "Hedwig", "Fawkes", "C"),
+                ("Who wrote 'Pride and Prejudice'?", "Emily Brontë", "Charlotte Brontë", "Virginia Woolf", "Jane Austen", "D"),
+                ("What is the name of the hobbit in 'The Lord of the Rings'?", "Bilbo", "Frodo", "Sam", "Both A and B", "D"),
+                ("Who wrote 'The Great Gatsby'?", "Ernest Hemingway", "F. Scott Fitzgerald", "John Steinbeck", "William Faulkner", "B"),
+                ("In which fictional city does Batman operate?", "Metropolis", "Star City", "Central City", "Gotham City", "D"),
+                ("Who is the author of 'To Kill a Mockingbird'?", "J.K. Rowling", "Harper Lee", "Stephen King", "John Grisham", "B"),
+                ("What's the name of the ship in Herman Melville's 'Moby Dick'?", "Pequod", "Nautilus", "HMS Bounty", "Flying Dutchman", "A")
+            ],
+            "general_knowledge": [
+                ("What is the capital of Japan?", "Beijing", "Seoul", "Tokyo", "Bangkok", "C"),
+                ("Which planet is known as the Red Planet?", "Jupiter", "Venus", "Mars", "Saturn", "C"),
+                ("Who painted the ceiling of the Sistine Chapel?", "Leonardo da Vinci", "Raphael", "Michelangelo", "Donatello", "C"),
+                ("What is the largest ocean on Earth?", "Atlantic", "Indian", "Arctic", "Pacific", "D"),
+                ("Which country is home to the kangaroo?", "New Zealand", "South Africa", "Australia", "Brazil", "C"),
+                ("What is the currency of the United Kingdom?", "Euro", "Pound", "Dollar", "Franc", "B"),
+                ("What is the tallest mountain in the world?", "K2", "Mount Kilimanjaro", "Mount Everest", "Mount Fuji", "C"),
+                ("How many sides does a hexagon have?", "5", "6", "7", "8", "B"),
+                ("Which element has the chemical symbol 'O'?", "Gold", "Oxygen", "Osmium", "Oganesson", "B"),
+                ("Who wrote 'The Origin of Species'?", "Isaac Newton", "Charles Darwin", "Albert Einstein", "Galileo Galilei", "B")
+            ]
+        }
+        
+        # Map category to table name
+        table_map = {
+            "Math": "math",
+            "Science": "science",
+            "History": "history",
+            "Literature": "literature",
+            "General Knowledge": "general_knowledge"
+        }
+        
+        # Check if table is empty before adding sample questions
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+        count = cursor.fetchone()[0]
+        
+        if count == 0:
+            questions = sample_questions[table_map[category]]
+            for q in questions:
+                cursor.execute(f"INSERT INTO {table_name} (question, option_a, option_b, option_c, option_d, correct_answer) VALUES (?, ?, ?, ?, ?, ?)", q)
+
+    def show_welcome_screen(self):
+        """Display the welcome screen with category selection"""
+        # Clear current widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Setup welcome screen
+        welcome_frame = tk.Frame(self.root, bg="#f0f0f0")
+        welcome_frame.pack(expand=True, fill="both", padx=20, pady=20)
+        
+        # Title
+        title_label = tk.Label(welcome_frame, text="Welcome to Quiz Application", 
+                             font=("Arial", 24, "bold"), bg="#f0f0f0")
+        title_label.pack(pady=30)
+        
+        # Instructions
+        instructions = tk.Label(welcome_frame, text="Please select a quiz category below to begin:", 
+                              font=("Arial", 14), bg="#f0f0f0")
+        instructions.pack(pady=10)
+        
+        # Category buttons
+        categories = ["Math", "Science", "History", "Literature", "General Knowledge"]
+        
+        for category in categories:
+            btn = tk.Button(welcome_frame, text=category, font=("Arial", 12), 
+                          width=20, height=2, 
+                          command=lambda cat=category: self.start_quiz(cat))
+            btn.pack(pady=10)
+        
+        # Admin button
+        admin_btn = tk.Button(welcome_frame, text="Admin Login", font=("Arial", 10),
+                            command=self.show_admin_login)
+        admin_btn.pack(pady=20)
+    
+    def start_quiz(self, category):
+        """Start quiz with selected category"""
+        self.current_category = category
+        self.current_question = 0
+        self.score = 0
+        
+        # Load questions from database
+        conn = sqlite3.connect("quiz_data.db")
+        cursor = conn.cursor()
+        
+        table_name = category.lower().replace(" ", "_")
+        cursor.execute(f"SELECT * FROM {table_name}")
+        
+        # Get all questions and shuffle them
+        all_questions = cursor.fetchall()
+        conn.close()
+        
+        if not all_questions:
+            messagebox.showerror("Error", f"No questions found for {category} category!")
+            return
+        
+        # Shuffle questions and select first 10 (or all if less than 10)
+        random.shuffle(all_questions)
+        self.questions = all_questions[:10]
+        
+        # Display first question
+        self.display_question()
+    
+    def display_question(self):
+        """Display the current question and options"""
+        # Clear current widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        if self.current_question >= len(self.questions):
+            # No more questions, show final score
+            self.show_final_score()
+            return
+        
+        question_data = self.questions[self.current_question]
+        _, question_text, option_a, option_b, option_c, option_d, _ = question_data
+        
+        # Create question frame
+        quiz_frame = tk.Frame(self.root, bg="#f0f0f0")
+        quiz_frame.pack(expand=True, fill="both", padx=20, pady=20)
+        
+        # Category and score display
+        header_frame = tk.Frame(quiz_frame, bg="#f0f0f0")
+        header_frame.pack(fill="x", pady=10)
+        
+        category_label = tk.Label(header_frame, text=f"Category: {self.current_category}", 
+                                font=("Arial", 12), bg="#f0f0f0")
+        category_label.pack(side="left")
+        
+        score_label = tk.Label(header_frame, text=f"Score: {self.score}/{self.current_question}", 
+                             font=("Arial", 12), bg="#f0f0f0")
+        score_label.pack(side="right")
+        
+        # Question number
+        question_num = tk.Label(quiz_frame, 
+                              text=f"Question {self.current_question + 1} of {len(self.questions)}", 
+                              font=("Arial", 14), bg="#f0f0f0")
+        question_num.pack(pady=10)
+        
+        # Question text
+        question_label = tk.Label(quiz_frame, text=question_text, 
+                                wraplength=700, justify="center",
+                                font=("Arial", 16), bg="#f0f0f0")
+        question_label.pack(pady=20)
+        
+        # Options
+        options_frame = tk.Frame(quiz_frame, bg="#f0f0f0")
+        options_frame.pack(pady=20)
+        
+        self.selected_answer = tk.StringVar()
+        options = [
+            ("A", option_a),
+            ("B", option_b),
+            ("C", option_c),
+            ("D", option_d)
+        ]
+        
+        for value, text in options:
+            rb = tk.Radiobutton(options_frame, text=f"{value}: {text}", 
+                              variable=self.selected_answer, value=value,
+                              font=("Arial", 12), bg="#f0f0f0", padx=10, pady=5)
+            rb.pack(anchor="w")
+        
+        # Submit button
+        submit_btn = tk.Button(quiz_frame, text="Submit Answer", font=("Arial", 12),
+                             command=self.check_answer)
+        submit_btn.pack(pady=20)
+    
+    def check_answer(self):
+        """Check if the selected answer is correct"""
+        if not self.selected_answer.get():
+            messagebox.showwarning("Warning", "Please select an answer.")
+            return
+        
+        # Get correct answer from database
+        _, _, _, _, _, _, correct_answer = self.questions[self.current_question]
+        
+        # Check if answer is correct
+        is_correct = (self.selected_answer.get() == correct_answer)
+        
+        # Show feedback
+        if is_correct:
+            messagebox.showinfo("Correct!", "Your answer is correct!")
+            self.score += 1
+        else:
+            messagebox.showinfo("Incorrect", f"The correct answer is {correct_answer}.")
+        
+        # Move to next question
+        self.current_question += 1
+        self.display_question()
+    
+    def show_final_score(self):
+        """Show the final score and options to restart or return to menu"""
+        # Clear current widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Create results frame
+        results_frame = tk.Frame(self.root, bg="#f0f0f0")
+        results_frame.pack(expand=True, fill="both", padx=20, pady=20)
+        
+        # Results title
+        results_title = tk.Label(results_frame, text="Quiz Complete!", 
+                               font=("Arial", 24, "bold"), bg="#f0f0f0")
+        results_title.pack(pady=30)
+        
+        # Display score
+        score_text = f"Your final score: {self.score}/{len(self.questions)}"
+        score_label = tk.Label(results_frame, text=score_text, 
+                             font=("Arial", 18), bg="#f0f0f0")
+        score_label.pack(pady=20)
+        
+        # Calculate percentage
+        percentage = (self.score / len(self.questions)) * 100
+        percentage_label = tk.Label(results_frame, text=f"{percentage:.1f}%", 
+                                  font=("Arial", 16), bg="#f0f0f0")
+        percentage_label.pack(pady=10)
+        
+        # Display message based on score
+        if percentage >= 80:
+            message = "Excellent! Great job!"
+        elif percentage >= 60:
+            message = "Good work! Keep it up!"
+        elif percentage >= 40:
+            message = "Not bad. Room for improvement."
+        else:
+            message = "Keep studying. You'll do better next time!"
+        
+        message_label = tk.Label(results_frame, text=message, 
+                               font=("Arial", 14), bg="#f0f0f0")
+        message_label.pack(pady=20)
+        
+        # Buttons
+        buttons_frame = tk.Frame(results_frame, bg="#f0f0f0")
+        buttons_frame.pack(pady=30)
+        
+        retry_btn = tk.Button(buttons_frame, text="Try Again", font=("Arial", 12),
+                            command=lambda: self.start_quiz(self.current_category))
+        retry_btn.pack(side="left", padx=10)
+        
+        menu_btn = tk.Button(buttons_frame, text="Back to Menu", font=("Arial", 12),
+                           command=self.show_welcome_screen)
+        menu_btn.pack(side="left", padx=10)
+    
+    def show_admin_login(self):
+        """Show admin login screen"""
+        # Clear current widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Create login frame
+        login_frame = tk.Frame(self.root, bg="#f0f0f0")
+        login_frame.pack(expand=True, fill="both", padx=20, pady=20)
+        
+        # Login title
+        login_title = tk.Label(login_frame, text="Admin Login", 
+                             font=("Arial", 24, "bold"), bg="#f0f0f0")
+        login_title.pack(pady=30)
+        
+        # Username
+        username_frame = tk.Frame(login_frame, bg="#f0f0f0")
+        username_frame.pack(fill="x", pady=10)
+        
+        username_label = tk.Label(username_frame, text="Username:", 
+                                font=("Arial", 12), bg="#f0f0f0", width=10)
+        username_label.pack(side="left", padx=10)
+        
+        self.username_entry = tk.Entry(username_frame, font=("Arial", 12), width=30)
+        self.username_entry.pack(side="left", padx=10)
+        
+        # Password
+        password_frame = tk.Frame(login_frame, bg="#f0f0f0")
+        password_frame.pack(fill="x", pady=10)
+        
+        password_label = tk.Label(password_frame, text="Password:", 
+                                font=("Arial", 12), bg="#f0f0f0", width=10)
+        password_label.pack(side="left", padx=10)
+        
+        self.password_entry = tk.Entry(password_frame, font=("Arial", 12), 
+                                     width=30, show="*")
+        self.password_entry.pack(side="left", padx=10)
+        
+        # Login button
+        buttons_frame = tk.Frame(login_frame, bg="#f0f0f0")
+        buttons_frame.pack(pady=30)
+        
+        login_btn = tk.Button(buttons_frame, text="Login", font=("Arial", 12),
+                            command=self.authenticate_admin)
+        login_btn.pack(side="left", padx=10)
+        
+        back_btn = tk.Button(buttons_frame, text="Back", font=("Arial", 12),
+                           command=self.show_welcome_screen)
+        back_btn.pack(side="left", padx=10)
+    
+    def authenticate_admin(self):
+        """Authenticate admin credentials"""
+        username = self.username_entry.get()
+        password = self.password_entry.get()
+        
+        if not username or not password:
+            messagebox.showerror("Error", "Please enter both username and password")
+            return
+        
+        # Hash the entered password
+        hashed_password = hashlib.sha256(password.encode()).hexdigest()
+        
+        # Check against database
+        conn = sqlite3.connect("quiz_data.db")
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM admins WHERE username = ? AND password = ?", 
+                     (username, hashed_password))
+        
+        admin = cursor.fetchone()
+        conn.close()
+        
+        if admin:
+            self.show_admin_panel()
+        else:
+            messagebox.showerror("Error", "Invalid username or password")
+    
+    def show_admin_panel(self):
+        """Show admin panel with options to manage questions"""
+        # Clear current widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Create admin panel frame
+        admin_frame = tk.Frame(self.root, bg="#f0f0f0")
+        admin_frame.pack(expand=True, fill="both", padx=20, pady=20)
+        
+        # Admin panel title
+        admin_title = tk.Label(admin_frame, text="Admin Panel", 
+                             font=("Arial", 24, "bold"), bg="#f0f0f0")
+        admin_title.pack(pady=30)
+        
+        # Option buttons
+        options_frame = tk.Frame(admin_frame, bg="#f0f0f0")
+        options_frame.pack(pady=20)
+        
+        add_btn = tk.Button(options_frame, text="Add New Questions", font=("Arial", 12),
+                          width=20, height=2, command=self.show_add_question_form)
+        add_btn.pack(pady=10)
+        
+        view_btn = tk.Button(options_frame, text="View/Edit Questions", font=("Arial", 12),
+                           width=20, height=2, command=self.show_view_questions)
+        view_btn.pack(pady=10)
+        
+        delete_btn = tk.Button(options_frame, text="Delete Questions", font=("Arial", 12),
+                             width=20, height=2, command=self.show_delete_question)
+        delete_btn.pack(pady=10)
+        
+        # Logout button
+        logout_btn = tk.Button(admin_frame, text="Logout", font=("Arial", 12),
+                             command=self.show_welcome_screen)
+        logout_btn.pack(pady=20)
+    
+    def show_add_question_form(self):
+        """Show form to add new questions"""
+        # Clear current widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Create form frame
+        form_frame = tk.Frame(self.root, bg="#f0f0f0")
+        form_frame.pack(expand=True, fill="both", padx=20, pady=20)
+        
+        # Form title
+        form_title = tk.Label(form_frame, text="Add New Question", 
+                            font=("Arial", 20, "bold"), bg="#f0f0f0")
+        form_title.pack(pady=20)
+        
+        # Category selection
+        category_frame = tk.Frame(form_frame, bg="#f0f0f0")
+        category_frame.pack(fill="x", pady=10)
+        
+        category_label = tk.Label(category_frame, text="Category:", 
+                                font=("Arial", 12), bg="#f0f0f0", width=12, anchor="w")
+        category_label.pack(side="left", padx=10)
+        
+        categories = ["Math", "Science", "History", "Literature", "General Knowledge"]
+        self.category_var = tk.StringVar()
+        self.category_var.set(categories[0])
+        
+        category_menu = tk.OptionMenu(category_frame, self.category_var, *categories)
+        category_menu.config(font=("Arial", 12), width=30)
+        category_menu.pack(side="left", padx=10)
+        
+        # Question
+        question_frame = tk.Frame(form_frame, bg="#f0f0f0")
+        question_frame.pack(fill="x", pady=10)
+        
+        question_label = tk.Label(question_frame, text="Question:", 
+                                font=("Arial", 12), bg="#f0f0f0", width=12, anchor="w")
+        question_label.pack(side="left", padx=10)
+        
+        self.question_entry = tk.Entry(question_frame, font=("Arial", 12), width=50)
+        self.question_entry.pack(side="left", padx=10)
+        
+        # Options
+        self.option_entries = []
+        option_labels = ["Option A:", "Option B:", "Option C:", "Option D:"]
+        
+        for label_text in option_labels:
+            option_frame = tk.Frame(form_frame, bg="#f0f0f0")
+            option_frame.pack(fill="x", pady=10)
+            
+            option_label = tk.Label(option_frame, text=label_text, 
+                                  font=("Arial", 12), bg="#f0f0f0", width=12, anchor="w")
+            option_label.pack(side="left", padx=10)
+            
+            option_entry = tk.Entry(option_frame, font=("Arial", 12), width=50)
+            option_entry.pack(side="left", padx=10)
+            
+            self.option_entries.append(option_entry)
+        
+        # Correct answer
+        correct_frame = tk.Frame(form_frame, bg="#f0f0f0")
+        correct_frame.pack(fill="x", pady=10)
+        
+        correct_label = tk.Label(correct_frame, text="Correct Answer:", 
+                               font=("Arial", 12), bg="#f0f0f0", width=12, anchor="w")
+        correct_label.pack(side="left", padx=10)
+        
+        self.correct_var = tk.StringVar()
+        self.correct_var.set("A")
+        
+        answers = ["A", "B", "C", "D"]
+        correct_menu = tk.OptionMenu(correct_frame, self.correct_var, *answers)
+        correct_menu.config(font=("Arial", 12), width=5)
+        correct_menu.pack(side="left", padx=10)
+        
+        # Buttons
+        buttons_frame = tk.Frame(form_frame, bg="#f0f0f0")
+        buttons_frame.pack(pady=20)
+        
+        save_btn = tk.Button(buttons_frame, text="Save Question", font=("Arial", 12),
+                           command=self.save_question)
+        save_btn.pack(side="left", padx=10)
+        
+        back_btn = tk.Button(buttons_frame, text="Back", font=("Arial", 12),
+                           command=self.show_admin_panel)
+        back_btn.pack(side="left", padx=10)
+    
+    def save_question(self):
+        """Save new question to database"""
+        # Get data from form
+        category = self.category_var.get()
+        question = self.question_entry.get()
+        options = [entry.get() for entry in self.option_entries]
+        correct_answer = self.correct_var.get()
+        
+        # Validate data
+        if not question or "" in options:
+            messagebox.showerror("Error", "Please fill in all fields")
+            return
+        
+        # Save to database
+        conn = sqlite3.connect("quiz_data.db")
+        cursor = conn.cursor()
+        
+        table_name = category.lower().replace(" ", "_")
+        cursor.execute(f"INSERT INTO {table_name} (question, option_a, option_b, option_c, option_d, correct_answer) VALUES (?, ?, ?, ?, ?, ?)",
+                     (question, options[0], options[1], options[2], options[3], correct_answer))
+        
+        conn.commit()
+        conn.close()
+        
+        messagebox.showinfo("Success", "Question added successfully!")
+        
+        # Clear form for next entry
+        self.question_entry.delete(0, tk.END)
+        for entry in self.option_entries:
+            entry.delete(0, tk.END)
+    
+    def show_view_questions(self):
+        """Show interface to view and edit questions"""
+        # Clear current widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Create view frame
+        view_frame = tk.Frame(self.root, bg="#f0f0f0")
+        view_frame.pack(expand=True, fill="both", padx=20, pady=20)
+        
+        # View title
+        view_title = tk.Label(view_frame, text="View/Edit Questions", 
+                            font=("Arial", 20, "bold"), bg="#f0f0f0")
+        view_title.pack(pady=20)
+        
+        # Category selection
+        category_frame = tk.Frame(view_frame, bg="#f0f0f0")
+        category_frame.pack(fill="x", pady=10)
+        
+        category_label = tk.Label(category_frame, text="Select Category:", 
+                                font=("Arial", 12), bg="#f0f0f0")
+        category_label.pack(side="left", padx=10)
+        
+        categories = ["Math", "Science", "History", "Literature", "General Knowledge"]
+        self.view_category_var = tk.StringVar()
+        self.view_category_var.set(categories[0])
+        
+        category_menu = tk.OptionMenu(category_frame, self.view_category_var, *categories, 
+                                    command=self.load_questions_for_view)
+        category_menu = tk.OptionMenu(category_frame, self.view_category_var, *categories, 
+                                    command=self.load_questions_for_view)
+        category_menu.config(font=("Arial", 12), width=15)
+        category_menu.pack(side="left", padx=10)
+        
+        # Create frame for questions table
+        self.questions_table_frame = tk.Frame(view_frame, bg="#f0f0f0")
+        self.questions_table_frame.pack(fill="both", expand=True, pady=20)
+        
+        # Back button
+        back_btn = tk.Button(view_frame, text="Back", font=("Arial", 12),
+                           command=self.show_admin_panel)
+        back_btn.pack(pady=20)
+        
+        # Load questions for initial category
+        self.load_questions_for_view(categories[0])
+    
+    def load_questions_for_view(self, category):
+        """Load questions for selected category and display in table"""
+        # Clear previous table
+        for widget in self.questions_table_frame.winfo_children():
+            widget.destroy()
+        
+        # Connect to database
+        conn = sqlite3.connect("quiz_data.db")
+        cursor = conn.cursor()
+        
+        table_name = category.lower().replace(" ", "_")
+        cursor.execute(f"SELECT id, question FROM {table_name}")
+        
+        questions = cursor.fetchall()
+        conn.close()
+        
+        if not questions:
+            no_questions_label = tk.Label(self.questions_table_frame, 
+                                        text=f"No questions found for {category} category.", 
+                                        font=("Arial", 12), bg="#f0f0f0")
+            no_questions_label.pack(pady=20)
+            return
+        
+        # Create scrollable frame
+        canvas = tk.Canvas(self.questions_table_frame, bg="#f0f0f0")
+        scrollbar = ttk.Scrollbar(self.questions_table_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all")
+            )
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Create headers
+        header_frame = ttk.Frame(scrollable_frame)
+        header_frame.pack(fill="x", pady=5)
+        
+        id_header = tk.Label(header_frame, text="ID", font=("Arial", 12, "bold"), width=5)
+        id_header.pack(side="left", padx=5)
+        
+        question_header = tk.Label(header_frame, text="Question", font=("Arial", 12, "bold"), width=50)
+        question_header.pack(side="left", padx=5)
+        
+        action_header = tk.Label(header_frame, text="Actions", font=("Arial", 12, "bold"), width=15)
+        action_header.pack(side="left", padx=5)
+        
+        # Separator
+        separator = ttk.Separator(scrollable_frame, orient="horizontal")
+        separator.pack(fill="x", pady=5)
+        
+        # List questions
+        for q_id, question in questions:
+            row_frame = ttk.Frame(scrollable_frame)
+            row_frame.pack(fill="x", pady=5)
+            
+            id_label = tk.Label(row_frame, text=str(q_id), font=("Arial", 12), width=5)
+            id_label.pack(side="left", padx=5)
+            
+            question_label = tk.Label(row_frame, text=question, font=("Arial", 12), 
+                                    width=50, anchor="w", wraplength=400)
+            question_label.pack(side="left", padx=5)
+            
+            edit_btn = tk.Button(row_frame, text="Edit", font=("Arial", 10),
+                               command=lambda qid=q_id, cat=category: self.edit_question(qid, cat))
+            edit_btn.pack(side="left", padx=5)
+    
+    def edit_question(self, question_id, category):
+        """Show form to edit a question"""
+        # Load question data
+        conn = sqlite3.connect("quiz_data.db")
+        cursor = conn.cursor()
+        
+        table_name = category.lower().replace(" ", "_")
+        cursor.execute(f"SELECT * FROM {table_name} WHERE id = ?", (question_id,))
+        
+        question_data = cursor.fetchone()
+        conn.close()
+        
+        if not question_data:
+            messagebox.showerror("Error", "Question not found!")
+            return
+        
+        # Clear current widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Create edit form
+        edit_frame = tk.Frame(self.root, bg="#f0f0f0")
+        edit_frame.pack(expand=True, fill="both", padx=20, pady=20)
+        
+        # Form title
+        form_title = tk.Label(edit_frame, text="Edit Question", 
+                            font=("Arial", 20, "bold"), bg="#f0f0f0")
+        form_title.pack(pady=20)
+        
+        # Question ID (hidden)
+        self.edit_question_id = question_id
+        self.edit_category = category
+        
+        # Question
+        question_frame = tk.Frame(edit_frame, bg="#f0f0f0")
+        question_frame.pack(fill="x", pady=10)
+        
+        question_label = tk.Label(question_frame, text="Question:", 
+                                font=("Arial", 12), bg="#f0f0f0", width=12, anchor="w")
+        question_label.pack(side="left", padx=10)
+        
+        self.edit_question_entry = tk.Entry(question_frame, font=("Arial", 12), width=50)
+        self.edit_question_entry.insert(0, question_data[1])  # Insert current question
+        self.edit_question_entry.pack(side="left", padx=10)
+        
+        # Options
+        self.edit_option_entries = []
+        option_labels = ["Option A:", "Option B:", "Option C:", "Option D:"]
+        option_values = [question_data[2], question_data[3], question_data[4], question_data[5]]
+        
+        for i, (label_text, value) in enumerate(zip(option_labels, option_values)):
+            option_frame = tk.Frame(edit_frame, bg="#f0f0f0")
+            option_frame.pack(fill="x", pady=10)
+            
+            option_label = tk.Label(option_frame, text=label_text, 
+                                  font=("Arial", 12), bg="#f0f0f0", width=12, anchor="w")
+            option_label.pack(side="left", padx=10)
+            
+            option_entry = tk.Entry(option_frame, font=("Arial", 12), width=50)
+            option_entry.insert(0, value)
+            option_entry.pack(side="left", padx=10)
+            
+            self.edit_option_entries.append(option_entry)
+        
+        # Correct answer
+        correct_frame = tk.Frame(edit_frame, bg="#f0f0f0")
+        correct_frame.pack(fill="x", pady=10)
+        
+        correct_label = tk.Label(correct_frame, text="Correct Answer:", 
+                               font=("Arial", 12), bg="#f0f0f0", width=12, anchor="w")
+        correct_label.pack(side="left", padx=10)
+        
+        self.edit_correct_var = tk.StringVar()
+        self.edit_correct_var.set(question_data[6])  # Set current correct answer
+        
+        answers = ["A", "B", "C", "D"]
+        correct_menu = tk.OptionMenu(correct_frame, self.edit_correct_var, *answers)
+        correct_menu.config(font=("Arial", 12), width=5)
+        correct_menu.pack(side="left", padx=10)
+        
+        # Buttons
+        buttons_frame = tk.Frame(edit_frame, bg="#f0f0f0")
+        buttons_frame.pack(pady=20)
+        
+        save_btn = tk.Button(buttons_frame, text="Save Changes", font=("Arial", 12),
+                           command=self.update_question)
+        save_btn.pack(side="left", padx=10)
+        
+        back_btn = tk.Button(buttons_frame, text="Cancel", font=("Arial", 12),
+                           command=lambda: self.show_view_questions())
+        back_btn.pack(side="left", padx=10)
+    
+    def update_question(self):
+        """Update question in database"""
+        # Get data from form
+        question = self.edit_question_entry.get()
+        options = [entry.get() for entry in self.edit_option_entries]
+        correct_answer = self.edit_correct_var.get()
+        
+        # Validate data
+        if not question or "" in options:
+            messagebox.showerror("Error", "Please fill in all fields")
+            return
+        
+        # Update database
+        conn = sqlite3.connect("quiz_data.db")
+        cursor = conn.cursor()
+        
+        table_name = self.edit_category.lower().replace(" ", "_")
+        cursor.execute(f"UPDATE {table_name} SET question = ?, option_a = ?, option_b = ?, option_c = ?, option_d = ?, correct_answer = ? WHERE id = ?",
+                     (question, options[0], options[1], options[2], options[3], correct_answer, self.edit_question_id))
+        
+        conn.commit()
+        conn.close()
+        
+        messagebox.showinfo("Success", "Question updated successfully!")
+        self.show_view_questions()
+    
+    def show_delete_question(self):
+        """Show interface to delete questions"""
+        # Clear current widgets
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        # Create delete frame
+        delete_frame = tk.Frame(self.root, bg="#f0f0f0")
+        delete_frame.pack(expand=True, fill="both", padx=20, pady=20)
+        
+        # Delete title
+        delete_title = tk.Label(delete_frame, text="Delete Questions", 
+                              font=("Arial", 20, "bold"), bg="#f0f0f0")
+        delete_title.pack(pady=20)
+        
+        # Category selection
+        category_frame = tk.Frame(delete_frame, bg="#f0f0f0")
+        category_frame.pack(fill="x", pady=10)
+        
+        category_label = tk.Label(category_frame, text="Select Category:", 
+                                font=("Arial", 12), bg="#f0f0f0")
+        category_label.pack(side="left", padx=10)
+        
+        categories = ["Math", "Science", "History", "Literature", "General Knowledge"]
+        self.delete_category_var = tk.StringVar()
+        self.delete_category_var.set(categories[0])
+        
+        category_menu = tk.OptionMenu(category_frame, self.delete_category_var, *categories, 
+                                     command=self.load_questions_for_delete)
+        category_menu.config(font=("Arial", 12), width=15)
+        category_menu.pack(side="left", padx=10)
+        
+        # Create frame for questions table
+        self.delete_table_frame = tk.Frame(delete_frame, bg="#f0f0f0")
+        self.delete_table_frame.pack(fill="both", expand=True, pady=20)
+        
+        # Back button
+        back_btn = tk.Button(delete_frame, text="Back", font=("Arial", 12),
+                           command=self.show_admin_panel)
+        back_btn.pack(pady=20)
+        
+        # Load questions for initial category
+        self.load_questions_for_delete(categories[0])
+    
+    def load_questions_for_delete(self, category):
+        """Load questions for selected category and display delete options"""
+        # Clear previous table
+        for widget in self.delete_table_frame.winfo_children():
+            widget.destroy()
+        
+        # Connect to database
+        conn = sqlite3.connect("quiz_data.db")
+        cursor = conn.cursor()
+        
+        table_name = category.lower().replace(" ", "_")
+        cursor.execute(f"SELECT id, question FROM {table_name}")
+        
+        questions = cursor.fetchall()
+        conn.close()
+        
+        if not questions:
+            no_questions_label = tk.Label(self.delete_table_frame, 
+                                        text=f"No questions found for {category} category.", 
+                                        font=("Arial", 12), bg="#f0f0f0")
+            no_questions_label.pack(pady=20)
+            return
+        
+        # Create scrollable frame
+        canvas = tk.Canvas(self.delete_table_frame, bg="#f0f0f0")
+        scrollbar = ttk.Scrollbar(self.delete_table_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all")
+            )
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Create headers
+        header_frame = ttk.Frame(scrollable_frame)
+        header_frame.pack(fill="x", pady=5)
+        
+        id_header = tk.Label(header_frame, text="ID", font=("Arial", 12, "bold"), width=5)
+        id_header.pack(side="left", padx=5)
+        
+        question_header = tk.Label(header_frame, text="Question", font=("Arial", 12, "bold"), width=50)
+        question_header.pack(side="left", padx=5)
+        
+        action_header = tk.Label(header_frame, text="Actions", font=("Arial", 12, "bold"), width=15)
+        action_header.pack(side="left", padx=5)
+        
+        # Separator
+        separator = ttk.Separator(scrollable_frame, orient="horizontal")
+        separator.pack(fill="x", pady=5)
+        
+        # List questions
+        for q_id, question in questions:
+            row_frame = ttk.Frame(scrollable_frame)
+            row_frame.pack(fill="x", pady=5)
+            
+            id_label = tk.Label(row_frame, text=str(q_id), font=("Arial", 12), width=5)
+            id_label.pack(side="left", padx=5)
+            
+            question_label = tk.Label(row_frame, text=question, font=("Arial", 12), 
+                                    width=50, anchor="w", wraplength=400)
+            question_label.pack(side="left", padx=5)
+            
+            delete_btn = tk.Button(row_frame, text="Delete", font=("Arial", 10), bg="#ff6b6b",
+                                 command=lambda qid=q_id, cat=category: self.confirm_delete_question(qid, cat))
+            delete_btn.pack(side="left", padx=5)
+    
+    def confirm_delete_question(self, question_id, category):
+        """Show confirmation before deleting question"""
+        confirm = messagebox.askyesno("Confirm Delete", 
+                                     "Are you sure you want to delete this question? This action cannot be undone.")
+        
+        if confirm:
+            conn = sqlite3.connect("quiz_data.db")
+            cursor = conn.cursor()
+            
+            table_name = category.lower().replace(" ", "_")
+            cursor.execute(f"DELETE FROM {table_name} WHERE id = ?", (question_id,))
+            
+            conn.commit()
+            conn.close()
+            
+            messagebox.showinfo("Success", "Question deleted successfully!")
+            self.load_questions_for_delete(category)
+
+
+# Main function to run the application
+def main():
+    root = tk.Tk()
+    app = QuizApp(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
